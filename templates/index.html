@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Data Assistant</title>
+    <style>
+        body { font-family: Arial; margin: 30px; }
+        textarea, input[type="text"] { width: 100%; padding: 10px; margin-top: 10px; }
+        .block { margin-bottom: 30px; }
+        code { background-color: #f3f3f3; display: block; padding: 10px; }
+    </style>
+</head>
+<body>
+    <h1>🤖 AI Data Assistant (Mistral + Flask)</h1>
+
+    <form method="POST" enctype="multipart/form-data">
+        <div class="block">
+            <label><strong>1. Upload CSV or Excel file</strong></label>
+            <input type="file" name="file">
+        </div>
+        <div class="block">
+            <label><strong>2. Ask your question about the data</strong></label>
+            <input type="text" name="question" placeholder="e.g., How many students have the name Patel?">
+        </div>
+        <input type="submit" value="Ask Mistral">
+    </form>
+
+    {% if message %}
+        <p><strong>Status:</strong> {{ message }}</p>
+    {% endif %}
+
+    {% if code %}
+        <h3>🧠 Generated Python Code:</h3>
+        <code>{{ code }}</code>
+    {% endif %}
+
+    {% if result %}
+        <h3>✅ Result:</h3>
+        {% if result.__class__.__name__ == 'DataFrame' %}
+            {{ result.to_html(classes="data", border=1) | safe }}
+        {% else %}
+            <pre>{{ result }}</pre>
+        {% endif %}
+    {% endif %}
+</body>
+</html>

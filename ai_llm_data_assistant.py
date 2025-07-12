@@ -1,22 +1,17 @@
+from flask import Flask, render_template, request, redirect
 import pandas as pd
 import requests
 import re
+import os
+from werkzeug.utils import secure_filename
 
-def load_file():
-    path = input("📂 Enter the path to your Excel or CSV file: ").strip().strip('"')
-    try:
-        if path.endswith(".xlsx"):
-            df = pd.read_excel(path)
-        elif path.endswith(".csv"):
-            df = pd.read_csv(path)
-        else:
-            print("❌ Please use a .xlsx or .csv file.")
-            exit()
-        print(f"✅ File loaded successfully with {df.shape[0]} rows and {df.shape[1]} columns.")
-        return df
-    except Exception as e:
-        print(f"❌ Error loading file: {e}")
-        exit()
+app = Flask(__name__)
+app.config['UPLOAD_FOLDER'] = 'uploads'
+
+# Ensure upload directory exists
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+df = None  # Global DataFrame to persist across requests
 
 def build_prompt(columns, question):
     return f"""
@@ -31,51 +26,64 @@ Assign the result to a variable called 'result'. No extra explanations.
 """
 
 def ask_llm(prompt):
-    try:
-        res = requests.post(
-            "http://localhost:11434/api/generate",
-            json={"model": "mistral", "prompt": prompt, "stream": False}
-        )
-        return res.json()["response"]
-    except Exception as e:
-        print(f"❌ Error contacting Mistral via Ollama: {e}")
-        exit()
+    response = requests.post(
+        "http://localhost:11434/api/generate",
+        json={"model": "deepseek-r1", "prompt": prompt, "stream": False}
+    )
+    return response.json()["response"]
 
 def extract_code(response):
     match = re.search(r"```python(.*?)```", response, re.DOTALL)
     return match.group(1).strip() if match else response.strip()
 
-def run_code(code, df):
+def run_generated_code(code, df):
     try:
         local_vars = {"df": df}
         exec(code, {}, local_vars)
         result = local_vars.get("result")
-        if result is not None:
-            print("\n✅ Here’s the result:\n")
-            print(result)
-        else:
-            print("⚠️ Code ran, but no result was assigned.")
+        return result, None
     except Exception as e:
-        print(f"\n❌ Error running the code:\n{e}")
+        return None, str(e)
 
-def main():
-    print("🤖 Hello! I’m your local AI Data Assistant powered by Mistral.\n")
-    df = load_file()
+@app.route("/", methods=["GET", "POST"])
+def index():
+    global df
+    message = ""
+    code = ""
+    result = None
 
-    while True:
-        question = input("\n💬 What would you like to know about your data? (or type 'exit' to quit): ").strip()
-        if question.lower() == "exit":
-            print("👋 Okay, goodbye!")
-            break
+    if request.method == "POST":
+        # Handle file upload
+        if "file" in request.files:
+            file = request.files["file"]
+            if file.filename != "":
+                filename = secure_filename(file.filename)
+                path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(path)
+                try:
+                    if filename.endswith(".csv"):
+                        df = pd.read_csv(path)
+                    elif filename.endswith(".xlsx"):
+                        df = pd.read_excel(path)
+                    else:
+                        message = "Unsupported file type."
+                        return render_template("index.html", message=message)
+                    message = f"File loaded with {df.shape[0]} rows and {df.shape[1]} columns."
+                except Exception as e:
+                    message = f"Error loading file: {e}"
 
-        prompt = build_prompt(df.columns, question)
-        print("🧠 Thinking...")
-        raw_response = ask_llm(prompt)
-        code = extract_code(raw_response)
+        # Handle question
+        if df is not None and "question" in request.form:
+            question = request.form["question"]
+            if question.strip():
+                prompt = build_prompt(df.columns, question)
+                llm_response = ask_llm(prompt)
+                code = extract_code(llm_response)
+                result, error = run_generated_code(code, df)
+                if error:
+                    message = f"Error running code: {error}"
 
-        print("\n📝 Generated Code:\n")
-        print(code)
-        run_code(code, df)
+    return render_template("index.html", message=message, code=code, result=result)
 
 if __name__ == "__main__":
-    main()
+    app.run(debug=True)
